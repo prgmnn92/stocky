@@ -55,14 +55,54 @@ apt update && apt upgrade -y
 log_success "System updated"
 
 ##############################################################################
-# Step 2: Install required packages
+# Step 2: Install Docker (if not already installed)
+##############################################################################
+if ! command -v docker &> /dev/null; then
+    log_info "Docker not found. Installing Docker..."
+
+    # Update package database
+    apt update
+
+    # Install prerequisites
+    apt install -y ca-certificates curl gnupg lsb-release
+
+    # Add Docker's official GPG key
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+    # Set up Docker repository
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+      $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    # Install Docker Engine
+    apt update
+    apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    log_success "Docker installed successfully"
+else
+    log_success "Docker is already installed"
+fi
+
+# Verify Docker is running
+if ! systemctl is-active --quiet docker; then
+    log_info "Starting Docker..."
+    systemctl start docker
+    systemctl enable docker
+fi
+
+log_success "Docker is running"
+
+##############################################################################
+# Step 3: Install required packages
 ##############################################################################
 log_info "Installing required packages..."
 apt install -y git curl nano ufw certbot
 log_success "Packages installed"
 
 ##############################################################################
-# Step 3: Configure firewall
+# Step 4: Configure firewall
 ##############################################################################
 log_info "Configuring firewall..."
 ufw --force enable
@@ -72,7 +112,7 @@ ufw allow 443/tcp
 log_success "Firewall configured"
 
 ##############################################################################
-# Step 4: Create application user
+# Step 5: Create application user
 ##############################################################################
 log_info "Creating stocky user..."
 if id "stocky" &>/dev/null; then

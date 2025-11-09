@@ -19,7 +19,8 @@ Deploy Stocky to Digital Ocean in **3 simple steps** using automated scripts.
 1. Go to [Digital Ocean](https://cloud.digitalocean.com) → **Create** → **Droplets**
 
 2. Select:
-   - **Image**: `Docker on Ubuntu 22.04` (under Marketplace)
+   - **Image**: `Ubuntu 22.04 (LTS) x64` (under OS tab)
+     - *Note: Script will install Docker automatically - no need for Docker marketplace image*
    - **Plan**: Basic - $6/mo (1GB RAM, 1 vCPU, 25GB SSD)
    - **Region**: Choose closest to you
    - **Authentication**: Add your SSH key (recommended)
