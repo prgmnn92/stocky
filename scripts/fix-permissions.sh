@@ -56,6 +56,15 @@ if [ -f ".env.prod" ]; then
     fi
 fi
 
+# Fix Dockerfile poetry command if needed
+if [ -f "Dockerfile" ]; then
+    if grep -q "poetry install --no-dev" Dockerfile; then
+        log_info "Fixing Dockerfile for Poetry v1.2+..."
+        sed -i 's/--no-dev/--only main/g' Dockerfile
+        log_success "Dockerfile updated"
+    fi
+fi
+
 # Set correct permissions
 log_info "Setting file permissions..."
 chown -R stocky:stocky $APP_DIR
