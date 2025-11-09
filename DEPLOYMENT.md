@@ -1,461 +1,537 @@
-# Deployment Guide
+# Stocky - Digital Ocean Deployment Guide
 
-Production deployment checklist and instructions for Stocky.
+Complete guide for deploying Stocky to Digital Ocean.
 
-## Pre-Deployment Checklist
+## Prerequisites
 
-### Security
-- [ ] Generate secure API keys for data providers
-- [ ] Use strong database passwords (if not SQLite)
-- [ ] Enable CORS only for trusted domains
-- [ ] Review and restrict API endpoint access
-- [ ] Set up SSL/TLS certificates
-- [ ] Configure firewall rules
-
-### Configuration
-- [ ] Set `APP_ENV=prod` in environment
-- [ ] Configure timezone correctly
-- [ ] Set appropriate logging level (INFO or WARNING)
-- [ ] Configure scheduler time for market hours
-- [ ] Set reasonable `LOOKBACK_DAYS` (default: 400)
-
-### Data Management
-- [ ] Plan database backup strategy
-- [ ] Configure log rotation
-- [ ] Set up monitoring alerts
-- [ ] Test data provider rate limits
-
-### Testing
-- [ ] Run full test suite: `make test`
-- [ ] Verify strategy logic with backtest
-- [ ] Test manual job trigger
-- [ ] Validate signal quality
-- [ ] Test API endpoints
+- Digital Ocean account
+- Domain name (optional but recommended for SSL)
+- Git installed locally
+- SSH key added to Digital Ocean
 
 ## Deployment Options
 
-### Option 1: Single VPS (Recommended for MVP)
+### Option 1: Docker Droplet (Recommended)
+- **Cost**: $6-12/month (Basic or Regular Droplet)
+- **Setup Time**: 15-20 minutes
+- **Best For**: Simple deployment, learning
 
-**Requirements**:
-- Ubuntu 22.04 or similar
-- 2 CPU cores
-- 2GB RAM
-- 10GB storage
-- Docker and Docker Compose
+### Option 2: App Platform
+- **Cost**: $12-24/month
+- **Setup Time**: 10 minutes
+- **Best For**: Managed service, auto-scaling
 
-**Steps**:
+This guide covers **Option 1: Docker Droplet** (more cost-effective and flexible).
 
-1. **Set up server**:
+---
+
+## Part 1: Create Digital Ocean Droplet
+
+### 1.1 Create Droplet
+
+1. Log into Digital Ocean → Create → Droplets
+2. Choose configuration:
+   - **Image**: Docker on Ubuntu 22.04
+   - **Plan**: Basic ($6/mo - 1GB RAM, 1 vCPU, 25GB SSD)
+   - **Datacenter**: Choose closest to you
+   - **Authentication**: SSH Key (recommended) or Password
+   - **Hostname**: `stocky-prod`
+
+3. Click **Create Droplet**
+
+### 1.2 Connect to Droplet
+
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Install Docker Compose
-sudo apt install docker-compose -y
-
-# Create application user
-sudo useradd -m -s /bin/bash trader
-sudo usermod -aG docker trader
+ssh root@your-droplet-ip
 ```
 
-2. **Deploy application**:
+---
+
+## Part 2: Server Setup
+
+### 2.1 Update System
+
 ```bash
-# Switch to trader user
-sudo su - trader
+apt update && apt upgrade -y
+```
 
-# Clone repository (or upload files)
-git clone https://github.com/yourusername/stocky.git
-cd stocky
+### 2.2 Install Additional Tools
 
-# Create .env file
-cp .env.example .env
-nano .env  # Edit configuration
+```bash
+apt install -y git curl nano
+```
 
-# Create data directory
-mkdir -p data
+### 2.3 Create Application User
 
-# Build and start
-docker-compose up -d
+```bash
+# Create user
+useradd -m -s /bin/bash stocky
+
+# Add to docker group
+usermod -aG docker stocky
+
+# Create app directory
+mkdir -p /opt/stocky
+chown -R stocky:stocky /opt/stocky
+```
+
+### 2.4 Setup Firewall (UFW)
+
+```bash
+# Enable firewall
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+ufw status
+```
+
+---
+
+## Part 3: Deploy Application
+
+### 3.1 Clone Repository
+
+```bash
+# Switch to stocky user
+su - stocky
+
+# Clone repository
+cd /opt/stocky
+git clone https://github.com/yourusername/stocky.git .
+
+# Or upload via SCP from local machine:
+# scp -r /path/to/stocky root@your-droplet-ip:/opt/stocky/
+```
+
+### 3.2 Configure Environment Variables
+
+```bash
+# Copy production environment template
+cp .env.prod.example .env.prod
+
+# Edit with your secrets
+nano .env.prod
+```
+
+**Required changes in `.env.prod`:**
+
+```bash
+# Generate secure JWT secret (run locally or on server)
+openssl rand -hex 32
+
+# Update .env.prod with generated key
+JWT_SECRET_KEY=your-generated-secret-here
+
+# Optional: Add OpenAI key for sentiment analysis
+OPENAI_API_KEY=sk-your-openai-key
+```
+
+### 3.3 Create Data Directories
+
+```bash
+mkdir -p data logs logs/nginx nginx/ssl
+chmod 755 data logs
+```
+
+### 3.4 Build and Start Services
+
+```bash
+# Build images
+docker-compose -f docker-compose.prod.yml build
+
+# Start services
+docker-compose -f docker-compose.prod.yml up -d
+
+# Check status
+docker-compose -f docker-compose.prod.yml ps
+
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
+### 3.5 Verify Deployment
+
+```bash
+# Test backend health
+curl http://localhost:8000/health
+
+# Test frontend
+curl http://your-droplet-ip/
+```
+
+---
+
+## Part 4: Domain Setup (Optional)
+
+### 4.1 Configure DNS
+
+1. Go to your domain registrar (e.g., Namecheap, GoDaddy)
+2. Add DNS records:
+   - **A Record**: `@` → `your-droplet-ip`
+   - **A Record**: `www` → `your-droplet-ip`
+
+3. Wait for DNS propagation (5-30 minutes)
+
+### 4.2 Install SSL Certificate (Let's Encrypt)
+
+```bash
+# Install certbot
+apt install -y certbot
+
+# Stop nginx temporarily
+docker-compose -f docker-compose.prod.yml stop frontend
+
+# Generate certificate
+certbot certonly --standalone -d yourdomain.com -d www.yourdomain.com
+
+# Copy certificates to nginx directory
+cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem /opt/stocky/nginx/ssl/
+cp /etc/letsencrypt/live/yourdomain.com/privkey.pem /opt/stocky/nginx/ssl/
+chown stocky:stocky /opt/stocky/nginx/ssl/*
+
+# Update nginx.conf
+nano /opt/stocky/nginx/nginx.conf
+```
+
+**In `nginx.conf`:**
+1. Comment out the HTTP `location /` block
+2. Uncomment the HTTPS server block
+3. Update `server_name` to your domain
+4. Uncomment the HTTP→HTTPS redirect
+
+```bash
+# Restart services
+docker-compose -f docker-compose.prod.yml restart frontend
+```
+
+### 4.3 Auto-Renew SSL Certificate
+
+```bash
+# Add cron job for auto-renewal
+crontab -e
+
+# Add this line (runs daily at 2am)
+0 2 * * * certbot renew --quiet --deploy-hook "cp /etc/letsencrypt/live/yourdomain.com/*.pem /opt/stocky/nginx/ssl/ && docker-compose -f /opt/stocky/docker-compose.prod.yml restart frontend"
+```
+
+---
+
+## Part 5: Create Admin User
+
+### 5.1 Access Backend Container
+
+```bash
+cd /opt/stocky
+docker-compose -f docker-compose.prod.yml exec backend bash
+```
+
+### 5.2 Create Admin User (Python Script)
+
+Create a script to add users:
+
+```bash
+# Inside container
+cat > /tmp/create_admin.py << 'EOF'
+import os
+os.chdir('/app')
+
+from app.database import engine, create_db_and_tables
+from app.models import User
+from sqlmodel import Session, select
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Initialize database
-docker-compose exec app python scripts/init_db.py
+create_db_and_tables(engine)
 
-# Check logs
-docker-compose logs -f
+with Session(engine) as session:
+    # Check if admin exists
+    stmt = select(User).where(User.username == "admin")
+    admin = session.exec(stmt).first()
+
+    if not admin:
+        admin = User(
+            username="admin",
+            email="admin@stocky.local",
+            password_hash=pwd_context.hash("changeme123"),
+            role="ADMIN",
+            balance=100000.0
+        )
+        session.add(admin)
+        session.commit()
+        print("✅ Admin user created!")
+        print("   Username: admin")
+        print("   Password: changeme123")
+        print("   ⚠️  CHANGE PASSWORD IMMEDIATELY!")
+    else:
+        print("❌ Admin user already exists")
+EOF
+
+python /tmp/create_admin.py
+exit
 ```
 
-3. **Set up reverse proxy (optional)**:
+**Important**: Change the admin password immediately after first login!
 
-**Nginx configuration** (`/etc/nginx/sites-available/stocky`):
-```nginx
-server {
-    listen 80;
-    server_name stocky.yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-Enable and restart:
-```bash
-sudo ln -s /etc/nginx/sites-available/stocky /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-```
-
-4. **SSL with Let's Encrypt**:
-```bash
-sudo apt install certbot python3-certbot-nginx -y
-sudo certbot --nginx -d stocky.yourdomain.com
-```
-
-### Option 2: Cloud Platform (AWS, GCP, Azure)
-
-**AWS ECS Fargate** (Serverless):
-
-1. **Build and push image**:
-```bash
-# Authenticate to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin YOUR_ECR_REPO
-
-# Build and push
-docker build -t stocky:latest .
-docker tag stocky:latest YOUR_ECR_REPO:latest
-docker push YOUR_ECR_REPO:latest
-```
-
-2. **Create ECS task definition**:
-```json
-{
-  "family": "stocky",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
-  "containerDefinitions": [{
-    "name": "stocky",
-    "image": "YOUR_ECR_REPO:latest",
-    "portMappings": [{
-      "containerPort": 8000,
-      "protocol": "tcp"
-    }],
-    "environment": [
-      {"name": "APP_ENV", "value": "prod"},
-      {"name": "TZ", "value": "Europe/Berlin"}
-    ],
-    "logConfiguration": {
-      "logDriver": "awslogs",
-      "options": {
-        "awslogs-group": "/ecs/stocky",
-        "awslogs-region": "us-east-1",
-        "awslogs-stream-prefix": "ecs"
-      }
-    }
-  }]
-}
-```
-
-3. **Create ECS service with ALB**.
-
-**Note**: For production, consider RDS (PostgreSQL) instead of SQLite.
-
-### Option 3: Kubernetes (Scalable)
-
-**Basic deployment** (`k8s/deployment.yaml`):
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: stocky
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: stocky
-  template:
-    metadata:
-      labels:
-        app: stocky
-    spec:
-      containers:
-      - name: stocky
-        image: stocky:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: APP_ENV
-          value: "prod"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: stocky-secrets
-              key: database-url
-        volumeMounts:
-        - name: data
-          mountPath: /app/data
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: stocky-data
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: stocky
-spec:
-  selector:
-    app: stocky
-  ports:
-  - port: 80
-    targetPort: 8000
-  type: LoadBalancer
+
+## Part 6: Monitoring & Maintenance
+
+### 6.1 View Logs
+
+```bash
+# All services
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Backend only
+docker-compose -f docker-compose.prod.yml logs -f backend
+
+# Frontend only
+docker-compose -f docker-compose.prod.yml logs -f frontend
 ```
 
-## Database Migration (SQLite → PostgreSQL)
+### 6.2 Restart Services
 
-When scaling beyond MVP:
-
-1. **Install PostgreSQL**:
 ```bash
-docker run -d \
-  --name postgres \
-  -e POSTGRES_PASSWORD=secure_password \
-  -e POSTGRES_DB=stocky \
-  -p 5432:5432 \
-  postgres:15
+# Restart all
+docker-compose -f docker-compose.prod.yml restart
+
+# Restart backend only
+docker-compose -f docker-compose.prod.yml restart backend
 ```
 
-2. **Update `.env`**:
+### 6.3 Update Application
+
 ```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/stocky
+cd /opt/stocky
+
+# Pull latest changes
+git pull origin main
+
+# Rebuild and restart
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml build
+docker-compose -f docker-compose.prod.yml up -d
+
+# Check status
+docker-compose -f docker-compose.prod.yml ps
 ```
 
-3. **Migrate data** (use Alembic or manual export):
+### 6.4 Backup Database
+
 ```bash
-# Export from SQLite
-sqlite3 data/trader.db .dump > backup.sql
-
-# Import to PostgreSQL (manual mapping required)
-# Or use a migration tool like pgloader
-```
-
-4. **Update connection settings**:
-- Remove SQLite-specific `connect_args` from `app/database.py`
-- Configure connection pooling for PostgreSQL
-
-## Monitoring and Maintenance
-
-### Health Checks
-
-**Endpoint**: `GET /health`
-
-**Monitoring script** (`scripts/healthcheck.sh`):
-```bash
+# Create backup script
+cat > /opt/stocky/scripts/backup.sh << 'EOF'
 #!/bin/bash
-response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
-if [ $response != "200" ]; then
-    echo "Health check failed: $response"
-    # Send alert (email, Slack, PagerDuty, etc.)
-    exit 1
-fi
-```
-
-**Cron job**:
-```bash
-*/5 * * * * /path/to/scripts/healthcheck.sh
-```
-
-### Log Management
-
-**Rotate logs** (`/etc/logrotate.d/stocky`):
-```
-/var/log/stocky/*.log {
-    daily
-    rotate 14
-    compress
-    missingok
-    notifempty
-    create 644 trader trader
-}
-```
-
-**View logs**:
-```bash
-# Docker
-docker-compose logs -f --tail=100
-
-# Systemd (if running as service)
-journalctl -u stocky -f
-```
-
-### Database Backups
-
-**Daily backup script** (`scripts/backup_db.sh`):
-```bash
-#!/bin/bash
-BACKUP_DIR="/backups/stocky"
-DATE=$(date +%Y%m%d)
-
+BACKUP_DIR="/opt/stocky/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p $BACKUP_DIR
+cp /opt/stocky/data/trader.db $BACKUP_DIR/trader_$DATE.db
+find $BACKUP_DIR -name "*.db" -mtime +7 -delete
+EOF
 
-# Backup SQLite
-cp data/trader.db "$BACKUP_DIR/trader_$DATE.db"
+chmod +x /opt/stocky/scripts/backup.sh
 
-# Compress
-gzip "$BACKUP_DIR/trader_$DATE.db"
-
-# Clean old backups (keep 30 days)
-find $BACKUP_DIR -name "*.db.gz" -mtime +30 -delete
-
-echo "Backup completed: trader_$DATE.db.gz"
+# Add to crontab (daily backup at 3am)
+crontab -e
+# Add: 0 3 * * * /opt/stocky/scripts/backup.sh
 ```
 
-**Cron job**:
+### 6.5 Monitor Resources
+
 ```bash
-0 2 * * * /path/to/scripts/backup_db.sh
+# Check disk space
+df -h
+
+# Check memory usage
+free -h
+
+# Check container stats
+docker stats
 ```
 
-### Performance Monitoring
+---
 
-**Key metrics**:
-- API response times
-- Job execution duration
-- Database query performance
-- Memory usage
-- CPU usage
+## Part 7: Scaling Up (If Needed)
 
-**Monitoring tools**:
-- Prometheus + Grafana
-- DataDog
-- New Relic
-- CloudWatch (AWS)
+### 7.1 Upgrade Droplet
+
+If you need more resources:
+
+1. Digital Ocean Dashboard → Droplets → Your Droplet
+2. Click "Resize"
+3. Choose larger plan ($12/mo for 2GB RAM)
+4. Resize (no downtime required)
+
+### 7.2 Add PostgreSQL Database (Optional)
+
+For better performance with multiple users:
+
+```bash
+# Add PostgreSQL service to docker-compose.prod.yml
+# Update DATABASE_URL in .env.prod
+# Migrate data from SQLite to PostgreSQL
+```
+
+---
+
+## Part 8: Security Best Practices
+
+### 8.1 Disable Root Login
+
+```bash
+# Edit SSH config
+nano /etc/ssh/sshd_config
+
+# Set:
+PermitRootLogin no
+PasswordAuthentication no
+
+# Restart SSH
+systemctl restart sshd
+```
+
+### 8.2 Setup Automatic Updates
+
+```bash
+apt install -y unattended-upgrades
+dpkg-reconfigure -plow unattended-upgrades
+```
+
+### 8.3 Enable Docker Log Rotation
+
+```bash
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+
+systemctl restart docker
+```
+
+---
 
 ## Troubleshooting
 
-### High Memory Usage
-- Reduce `LOOKBACK_DAYS` to fetch less historical data
-- Optimize strategy calculations
-- Consider PostgreSQL for better memory management
+### Issue: Services Won't Start
 
-### Slow API Responses
-- Add database indexes on frequently queried columns
-- Implement caching layer (Redis)
-- Use connection pooling
-
-### Scheduler Not Running
-- Check timezone configuration
-- Verify cron expression
-- Check logs for scheduler errors
-- Ensure APScheduler is started in `main.py`
-
-### Data Provider Rate Limits
-- Implement exponential backoff
-- Add delays between API calls
-- Consider premium data provider tier
-- Cache data more aggressively
-
-## Security Hardening
-
-### Application Level
-1. **API Authentication**: Add JWT or API key authentication
-2. **Rate Limiting**: Implement rate limiting on endpoints
-3. **Input Validation**: Validate all user inputs
-4. **Error Handling**: Don't expose stack traces in production
-
-### Infrastructure Level
-1. **Firewall**: Only expose port 8000 (or 443 for HTTPS)
-2. **SSH**: Use key-based authentication, disable password login
-3. **Updates**: Keep system and dependencies updated
-4. **Backups**: Store backups securely (encrypted, off-site)
-
-### Docker Security
-1. **Non-root user**: ✓ Already implemented
-2. **Read-only filesystem**: Consider for containers
-3. **Resource limits**: Set memory/CPU limits
-4. **Image scanning**: Use `docker scan` or Snyk
-
-## Scaling Considerations
-
-### Horizontal Scaling (Multiple Instances)
-
-**Challenges with SQLite**:
-- File-based, not designed for concurrent writes
-- Migrate to PostgreSQL for multi-instance deployment
-
-**Load balancing**:
-- Use Nginx, HAProxy, or cloud load balancer
-- Implement session affinity if needed
-- Share database connection
-
-### Vertical Scaling (Bigger Machine)
-
-**When to scale**:
-- > 100 symbols being tracked
-- > 10 strategies running
-- Response times > 1 second
-- Memory usage > 80%
-
-**Resource recommendations**:
-- Small: 1 CPU, 1GB RAM (< 50 symbols)
-- Medium: 2 CPU, 2GB RAM (50-100 symbols)
-- Large: 4 CPU, 4GB RAM (> 100 symbols)
-
-## Support and Updates
-
-### Update Process
-
-1. **Test in staging**:
 ```bash
-git pull origin main
-docker-compose build
-docker-compose up -d
+# Check logs
+docker-compose -f docker-compose.prod.yml logs
+
+# Check disk space
+df -h
+
+# Check memory
+free -h
 ```
 
-2. **Backup production**:
+### Issue: Frontend Shows 502 Error
+
 ```bash
-./scripts/backup_db.sh
+# Check backend is running
+docker-compose -f docker-compose.prod.yml ps
+
+# Restart backend
+docker-compose -f docker-compose.prod.yml restart backend
+
+# Check backend logs
+docker-compose -f docker-compose.prod.yml logs backend
 ```
 
-3. **Deploy to production**:
+### Issue: Database Locked Error
+
 ```bash
-docker-compose down
-git pull origin main
-docker-compose up -d
+# Check database file permissions
+ls -la /opt/stocky/data/
+
+# Fix permissions
+chown -R stocky:stocky /opt/stocky/data/
+
+# Restart backend
+docker-compose -f docker-compose.prod.yml restart backend
 ```
 
-4. **Verify health**:
-```bash
-curl http://localhost:8000/health
-docker-compose logs -f --tail=50
-```
-
-### Rollback Procedure
+### Issue: SSL Certificate Not Working
 
 ```bash
-# Stop current version
-docker-compose down
+# Check certificate files exist
+ls -la /opt/stocky/nginx/ssl/
 
-# Restore database
-cp /backups/stocky/trader_YYYYMMDD.db.gz data/
-gunzip data/trader_YYYYMMDD.db.gz
+# Check nginx configuration
+docker-compose -f docker-compose.prod.yml exec frontend nginx -t
 
-# Checkout previous version
-git checkout <previous-commit>
-
-# Rebuild and start
-docker-compose up -d
+# View nginx logs
+docker-compose -f docker-compose.prod.yml logs frontend
 ```
 
 ---
 
-**Need help?** Check the [README](README.md) or open an issue on GitHub.
+## Cost Breakdown
+
+### Basic Deployment (Recommended)
+- **Droplet**: $6/month (1GB RAM)
+- **Domain**: $10-15/year (optional)
+- **SSL**: Free (Let's Encrypt)
+- **Total**: ~$6-7/month
+
+### With AI Features
+- **Droplet**: $6/month
+- **OpenAI API**: ~$5-20/month (depending on usage)
+- **Total**: ~$11-26/month
+
+---
+
+## Quick Reference Commands
+
+```bash
+# Start services
+docker-compose -f docker-compose.prod.yml up -d
+
+# Stop services
+docker-compose -f docker-compose.prod.yml down
+
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Restart services
+docker-compose -f docker-compose.prod.yml restart
+
+# Update application
+git pull && docker-compose -f docker-compose.prod.yml up -d --build
+
+# Access backend shell
+docker-compose -f docker-compose.prod.yml exec backend bash
+
+# Backup database
+cp data/trader.db data/trader_backup_$(date +%Y%m%d).db
+```
+
+---
+
+## Support
+
+- **Documentation**: Check README.md and CLAUDE.md
+- **Issues**: Report on GitHub
+- **Logs**: Check `/opt/stocky/logs/`
+
+---
+
+## Next Steps After Deployment
+
+1. ✅ Access your app at `http://your-droplet-ip` or `https://yourdomain.com`
+2. ✅ Login with admin credentials
+3. ✅ Change admin password immediately
+4. ✅ Add symbols to watch
+5. ✅ Configure strategies
+6. ✅ Wait for daily job to run (default: 20:00 Europe/Berlin)
+7. ✅ Monitor logs and resource usage
+
+**Congratulations! Your Stocky trading platform is now live! 🚀**
