@@ -129,7 +129,7 @@ fi
 ##############################################################################
 log_info "Stopping frontend service temporarily..."
 cd $APP_DIR
-docker-compose -f docker-compose.prod.yml stop frontend
+docker compose -f docker-compose.prod.yml stop frontend
 log_success "Frontend stopped"
 
 ##############################################################################
@@ -158,7 +158,7 @@ else
         log_success "SSL certificate obtained successfully"
     else
         log_error "Failed to obtain SSL certificate"
-        docker-compose -f docker-compose.prod.yml up -d frontend
+        docker compose -f docker-compose.prod.yml up -d frontend
         exit 1
     fi
 fi
@@ -204,7 +204,7 @@ log_success "Nginx configuration updated"
 ##############################################################################
 log_info "Restarting services..."
 cd $APP_DIR
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Wait for services to be healthy
 sleep 10
@@ -234,7 +234,7 @@ certbot renew --quiet --deploy-hook "\\
     chown stocky:stocky /opt/stocky/nginx/ssl/*.pem && \\
     chmod 600 /opt/stocky/nginx/ssl/*.pem && \\
     cd /opt/stocky && \\
-    docker-compose -f docker-compose.prod.yml restart frontend"
+    docker compose -f docker-compose.prod.yml restart frontend"
 EOF
 
 chmod +x /opt/stocky/scripts/renew-cert.sh

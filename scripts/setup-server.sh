@@ -78,7 +78,7 @@ if ! command -v docker &> /dev/null; then
 
     # Install Docker Engine
     apt update
-    apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker compose-plugin
 
     log_success "Docker installed successfully"
 else
@@ -204,10 +204,10 @@ log_success "Permissions set"
 ##############################################################################
 log_info "Building Docker images (this may take a few minutes)..."
 cd $APP_DIR
-sudo -u stocky docker-compose -f docker-compose.prod.yml build
+sudo -u stocky docker compose -f docker-compose.prod.yml build
 
 log_info "Starting services..."
-sudo -u stocky docker-compose -f docker-compose.prod.yml up -d
+sudo -u stocky docker compose -f docker-compose.prod.yml up -d
 
 log_success "Services started"
 
@@ -222,7 +222,7 @@ if curl -f http://localhost:8000/health &>/dev/null; then
     log_success "Backend is healthy"
 else
     log_warning "Backend health check failed, checking logs..."
-    docker-compose -f docker-compose.prod.yml logs backend | tail -20
+    docker compose -f docker-compose.prod.yml logs backend | tail -20
 fi
 
 ##############################################################################
@@ -230,7 +230,7 @@ fi
 ##############################################################################
 log_info "Creating admin user..."
 
-docker-compose -f docker-compose.prod.yml exec -T backend python << 'EOF'
+docker compose -f docker-compose.prod.yml exec -T backend python << 'EOF'
 import os
 os.chdir('/app')
 
@@ -303,7 +303,7 @@ DOCKER_EOF
 
 systemctl restart docker
 sleep 5
-sudo -u stocky docker-compose -f docker-compose.prod.yml up -d
+sudo -u stocky docker compose -f docker-compose.prod.yml up -d
 
 log_success "Docker log rotation configured"
 
@@ -331,10 +331,10 @@ echo "  Password: changeme123"
 echo -e "  ${RED}⚠️  CHANGE THIS PASSWORD IMMEDIATELY!${NC}"
 echo ""
 echo -e "${BLUE}Useful Commands:${NC}"
-echo "  View logs: cd $APP_DIR && docker-compose -f docker-compose.prod.yml logs -f"
-echo "  Restart: cd $APP_DIR && docker-compose -f docker-compose.prod.yml restart"
-echo "  Stop: cd $APP_DIR && docker-compose -f docker-compose.prod.yml down"
-echo "  Start: cd $APP_DIR && docker-compose -f docker-compose.prod.yml up -d"
+echo "  View logs: cd $APP_DIR && docker compose -f docker-compose.prod.yml logs -f"
+echo "  Restart: cd $APP_DIR && docker compose -f docker-compose.prod.yml restart"
+echo "  Stop: cd $APP_DIR && docker compose -f docker-compose.prod.yml down"
+echo "  Start: cd $APP_DIR && docker compose -f docker-compose.prod.yml up -d"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo "  1. Access http://$SERVER_IP and login"
