@@ -181,7 +181,24 @@ if [ ! -f ".env.prod" ]; then
         nano .env.prod
     fi
 else
-    log_warning ".env.prod already exists, skipping..."
+    log_warning ".env.prod already exists. Checking JWT_SECRET_KEY..."
+
+    # Check if JWT_SECRET_KEY is set
+    if grep -q "JWT_SECRET_KEY=your-secure-jwt-secret-key-here-change-this" .env.prod || grep -q "JWT_SECRET_KEY=$" .env.prod || ! grep -q "JWT_SECRET_KEY=" .env.prod; then
+        log_warning "JWT_SECRET_KEY not configured. Generating new one..."
+        JWT_SECRET=$(openssl rand -hex 32)
+
+        # Add or update JWT_SECRET_KEY
+        if grep -q "JWT_SECRET_KEY=" .env.prod; then
+            sed -i "s/JWT_SECRET_KEY=.*/JWT_SECRET_KEY=$JWT_SECRET/" .env.prod
+        else
+            echo "JWT_SECRET_KEY=$JWT_SECRET" >> .env.prod
+        fi
+
+        log_success "JWT_SECRET_KEY generated and added to .env.prod"
+    else
+        log_success "JWT_SECRET_KEY is already configured"
+    fi
 fi
 
 ##############################################################################
@@ -204,10 +221,13 @@ log_success "Permissions set"
 ##############################################################################
 log_info "Building Docker images (this may take a few minutes)..."
 cd $APP_DIR
-sudo -u stocky docker compose -f docker-compose.prod.yml build
+
+# Run docker commands as root, but ensure stocky user owns the files
+# Note: Using 'sg docker' to run commands with docker group without logout
+docker compose -f docker-compose.prod.yml build
 
 log_info "Starting services..."
-sudo -u stocky docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 log_success "Services started"
 
@@ -303,7 +323,8 @@ DOCKER_EOF
 
 systemctl restart docker
 sleep 5
-sudo -u stocky docker compose -f docker-compose.prod.yml up -d
+cd $APP_DIR
+docker compose -f docker-compose.prod.yml up -d
 
 log_success "Docker log rotation configured"
 
