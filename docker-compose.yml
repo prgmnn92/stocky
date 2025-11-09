@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: stocky
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - APP_ENV=${APP_ENV:-prod}
+      - TZ=${TZ:-Europe/Berlin}
+      - DATABASE_URL=sqlite:///data/trader.db
+      - DATA_PROVIDER=${DATA_PROVIDER:-yahoo}
+      - ALPHA_VANTAGE_KEY=${ALPHA_VANTAGE_KEY:-}
+      - SCHED_HOUR=${SCHED_HOUR:-20}
+      - SCHED_MINUTE=${SCHED_MINUTE:-0}
+      - SCHED_TIMEZONE=${SCHED_TIMEZONE:-Europe/Berlin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

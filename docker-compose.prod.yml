@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stocky-backend
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - APP_ENV=prod
+      - TZ=${TZ:-Europe/Berlin}
+      - DATABASE_URL=sqlite:///data/trader.db
+      - DATA_PROVIDER=${DATA_PROVIDER:-yahoo}
+      - LOOKBACK_DAYS=${LOOKBACK_DAYS:-400}
+      - SCHED_HOUR=${SCHED_HOUR:-20}
+      - SCHED_MINUTE=${SCHED_MINUTE:-0}
+      - SCHED_TIMEZONE=${SCHED_TIMEZONE:-Europe/Berlin}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    networks:
+      - stocky-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Frontend (Nginx serving static files)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: stocky-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - backend
+    networks:
+      - stocky-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  stocky-network:
+    driver: bridge
+
+volumes:
+  data:
+  logs:
